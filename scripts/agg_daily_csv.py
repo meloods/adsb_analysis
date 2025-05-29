@@ -311,7 +311,7 @@ def aggregate_daily_csv(
             logging.info(f"Estimated speedup: {speedup:.1f}x")
 
         logging.info(
-            f"Timestamp range: {final_df['abs_timestamp'].min():.0f} to {final_df['abs_timestamp'].max():.0f}"
+            f"Timestamp range: {final_df['datetime'].min()} to {final_df['datetime'].max()}"
         )
 
         return True
@@ -327,24 +327,14 @@ def main():
         epilog="Example: python aggregate_daily_csv.py 2025.05.27",
     )
     parser.add_argument("date", type=validate_date, help="Date in YYYY.MM.DD format")
-    parser.add_argument(
-        "--sequential",
-        action="store_true",
-        help="Force sequential processing (disable parallel processing)",
-    )
 
     args = parser.parse_args()
 
-    use_parallel = not args.sequential
+    logging.info(
+        f"Starting aggregation for {args.date} (batch_size={BATCH_SIZE}, chunk_size={CHUNK_SIZE})"
+    )
 
-    if args.sequential:
-        logging.info("Sequential processing mode forced")
-    else:
-        logging.info(f"Parallel processing enabled (max_workers={MAX_WORKERS})")
-
-    logging.info(f"Starting aggregation for {args.date}")
-
-    success = aggregate_daily_csv(args.date, use_parallel=use_parallel)
+    success = aggregate_daily_csv(args.date)
     return 0 if success else 1
 
 
