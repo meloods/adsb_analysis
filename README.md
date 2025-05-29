@@ -33,7 +33,25 @@ cat v2025.05.18-planes-readsb-prod-0.tar.aa v2025.05.18-planes-readsb-prod-0.tar
 
 Adjust the filenames and folder names according to the date and files you've downloaded.
 
-OR run `python scripts/get_traces.py YYYY.MM.DD`
+### OR 
+
+run `python scripts/get_traces.py YYYY.MM.DD`
+
+The data will be stored in the following format:
+```
+data/
+└── 2025.05.18/
+    ├── downloaded/
+    ├── extracted/
+    │   └── traces/
+    │       ├── 00/
+    │       ├── 01/
+    │       └── ...
+    └── traces/
+        ├── abc123.json
+        ├── def456.json
+        └── ...
+```
 
 ---
 
@@ -42,6 +60,7 @@ OR run `python scripts/get_traces.py YYYY.MM.DD`
 ### `trace_full_<ICAO-hex-id>.json`
 
 Each file contains time-stamped position reports for a specific aircraft over a single day.
+> Note: While files are named .json, they are actually gzip-compressed. Use gzip.open() or CLI gunzip -c to read them.
 
 | Key         | Type   | Description                                                                      |
 | ----------- | ------ | -------------------------------------------------------------------------------- |
