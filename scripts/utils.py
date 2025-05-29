@@ -9,11 +9,15 @@ from config import LOG_FORMAT, LOG_LEVEL
 
 
 def setup_logging():
-    if not logging.getLogger().hasHandlers():
-        logging.basicConfig(
-            level=getattr(logging, LOG_LEVEL),
-            format=LOG_FORMAT,
-        )
+    """Set up logging configuration (only if not already configured)."""
+    # Check if logging is already configured
+    if logging.root.handlers:
+        return
+
+    logging.basicConfig(
+        level=getattr(logging, LOG_LEVEL),
+        format=LOG_FORMAT,
+    )
 
 
 def validate_date(date_str: str) -> str:
