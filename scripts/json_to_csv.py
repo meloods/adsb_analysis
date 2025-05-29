@@ -153,7 +153,7 @@ def convert_json_to_csv(json_path: Path, include_metadata: bool = False) -> bool
 def main():
     parser = argparse.ArgumentParser(
         description="Convert a single trace JSON file to CSV format",
-        epilog="Example: python json_to_csv.py data/2025.05.27/traces/trace_full_abc123.json --metadata true",
+        epilog="Example: python scripts/json_to_csv.py data/2024.12.02/traces/trace_full_a73fa5.json --metadata true",
     )
     parser.add_argument(
         "json_file", type=Path, help="Path to the trace JSON file to convert"
