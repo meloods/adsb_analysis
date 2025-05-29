@@ -112,7 +112,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     for date_str in args.dates:
-        logging.info(f"\n📦 Extracting data from {date_str}...")
+        logging.info(f"\nExtracting data from {date_str}...")
         extract_for_date(date_str)
 
-    logging.info("\n✅ Extraction complete.")
+    logging.info("\nExtraction complete.")

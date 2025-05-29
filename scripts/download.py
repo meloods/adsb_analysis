@@ -129,7 +129,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     for date_str in args.dates:
-        logging.info(f"\n🔄 Downloading data from {date_str}...")
+        logging.info(f"\nDownloading data from {date_str}...")
         download_for_date(date_str)
 
-    logging.info("\n✅ Downloading complete.")
+    logging.info("\nDownloading complete.")
