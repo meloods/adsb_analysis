@@ -1,3 +1,4 @@
 # config.yaml
 paths:
   data_dir: data
+  processed_dir: data/processed

@@ -12,6 +12,10 @@ def get_data_dir(config: dict[str, Any]) -> Path:
     return Path(config["paths"]["data_dir"]).resolve()
 
 
+def get_processed_dir(config: dict[str, Any]) -> Path:
+    return Path(config["paths"]["processed_dir"]).resolve()
+
+
 def setup_logging() -> None:
     import logging
 
