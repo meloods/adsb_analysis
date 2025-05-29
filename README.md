@@ -15,11 +15,6 @@ After activating your environment, run the following command to get the data:
 ```bash
 PYTHONPATH=src python src/data_eng/run_pipeline.py 2025.02.08 2025.02.04 2025.02.03 2024.12.07 2024.12.03 2024.12.02
 ```
-Run this command to convert a given date into a singular CSV file:
-```bash
-PYTHONPATH=src python src/data_processing/run_pipeline.py --date 2024.01.01
-```
-
 ---
 
 # 📄 JSON File Format: `trace_full_<ICAO-hex-id>.json`
@@ -259,6 +254,9 @@ conda config --set channel_priority strict
 
 # Others
 Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
+
+bottom bound is 01.3000N top bound is 02.3000N
+left bound   is 104.3600E right bound is 106.0000E
 
 ---
 
