@@ -52,6 +52,7 @@ data/
         ├── def456.json
         └── ...
 ```
+the `.json` files in the `traces` folder 
 
 ---
 
