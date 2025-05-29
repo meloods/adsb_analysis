@@ -48,7 +48,7 @@ def main():
         return
 
     # --- Placeholder for real logic ---
-    from data_processing.processor import flatten_all_json_to_csv
+    from data_processing.json_to_csv import flatten_all_json_to_csv
 
     flatten_all_json_to_csv(input_dir, output_csv, include_metadata)
 
