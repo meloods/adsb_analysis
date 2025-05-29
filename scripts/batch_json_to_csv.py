@@ -14,7 +14,6 @@ from utils import (
     setup_logging,
     validate_date,
     create_output_path,
-    PerformanceTracker,
 )
 from trace_processor import TraceProcessor, ProcessingConfig
 
@@ -32,9 +31,6 @@ class BatchProcessor:
         # Setup directory paths
         self.traces_dir = BASE_DIR / date_str / SUBDIR_TRACES
         self.csv_dir = BASE_DIR / date_str / SUBDIR_CSV
-
-        # Performance tracking
-        self.tracker = PerformanceTracker()
 
     def find_json_files(self) -> List[Path]:
         """Find all trace_full_*.json files in the traces directory."""
@@ -191,16 +187,11 @@ class BatchProcessor:
 
     def run_batch_conversion(self) -> bool:
         """Execute the complete batch conversion process."""
-        self.tracker.start_phase("file_discovery")
-
         # Find all JSON files
         json_files = self.find_json_files()
         if not json_files:
             self.logger.warning(f"No JSON files found for {self.date_str}")
             return False
-
-        self.tracker.end_phase("file_discovery")
-        self.tracker.increment("files_found", len(json_files))
 
         # Filter files if not forcing reconversion
         if not self.config.force_reprocess:
@@ -212,13 +203,10 @@ class BatchProcessor:
                 self.logger.info(
                     f"Skipping {skipped} files that already have CSV outputs"
                 )
-                self.tracker.increment("files_skipped", skipped)
 
             if not json_files:
                 self.logger.info("All JSON files have already been converted to CSV")
                 return True
-
-        self.tracker.increment("files_to_process", len(json_files))
 
         # Log processing configuration
         metadata_status = "enabled" if self.config.include_metadata else "disabled"
@@ -230,60 +218,16 @@ class BatchProcessor:
         self.logger.info(f"Processing mode: {processing_mode}")
         self.logger.info(f"Metadata flattening: {metadata_status}")
 
-        # Start conversion phase
-        self.tracker.start_phase("conversion")
-
         # Convert files
         if self.config.parallel and len(json_files) > 1:
             successful, failed, durations = self.batch_convert_parallel(json_files)
         else:
             successful, failed, durations = self.batch_convert_sequential(json_files)
 
-        self.tracker.end_phase("conversion")
-
-        # Update performance metrics
-        self.tracker.increment("files_processed", len(json_files))
-        self.tracker.increment("files_successful", successful)
-        self.tracker.increment("files_failed", failed)
-
-        # Calculate performance statistics
-        if durations:
-            avg_duration = sum(durations) / len(durations)
-            self.tracker.counters["avg_time_per_file"] = avg_duration
-            self.tracker.counters["fastest_file"] = min(durations)
-            self.tracker.counters["slowest_file"] = max(durations)
-
-        # Calculate parallelization efficiency
-        if self.config.parallel and len(json_files) > 1 and durations:
-            conversion_time = self.tracker.phase_times["conversion"]["duration"]
-            theoretical_sequential_time = sum(durations)
-            efficiency = theoretical_sequential_time / (
-                conversion_time * self.config.max_workers
-            )
-            self.tracker.counters["parallelization_efficiency"] = efficiency
-
-        # Report results
-        self.tracker.report_summary(
-            f"batch conversion for {self.date_str}", self.logger
+        # Report simple results
+        self.logger.info(
+            f"Conversion complete: {successful} successful, {failed} failed"
         )
-
-        # Additional specific metrics
-        success_rate = (
-            (successful / (successful + failed)) * 100
-            if (successful + failed) > 0
-            else 0
-        )
-        self.logger.info(f"Success rate: {success_rate:.1f}%")
-
-        if durations:
-            self.logger.info(f"Average time per file: {avg_duration:.3f} seconds")
-            self.logger.info(f"Fastest file: {min(durations):.3f} seconds")
-            self.logger.info(f"Slowest file: {max(durations):.3f} seconds")
-
-        if "parallelization_efficiency" in self.tracker.counters:
-            self.logger.info(
-                f"Parallelization efficiency: {self.tracker.counters['parallelization_efficiency']:.1f}x"
-            )
 
         return failed == 0
 
