@@ -6,6 +6,7 @@ import gzip
 import logging
 from pathlib import Path
 from typing import Generator
+from tqdm import tqdm
 
 from config import BASE_DIR
 from utils import setup_logging, validate_date
@@ -43,7 +44,8 @@ def decompress_for_date(date_str: str, base_dir: Path = BASE_DIR):
         return
 
     count = 0
-    for gz_file in iter_gz_json_files(in_dir):
+    files = list(iter_gz_json_files(in_dir))
+    for gz_file in tqdm(files, desc=f"Decompressing {date_str}", unit="file"):
         decompress_file(gz_file, out_dir)
         count += 1
 

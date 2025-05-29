@@ -6,6 +6,7 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import List, Dict
+from tqdm import tqdm
 
 from config import BASE_DIR
 from utils import setup_logging, validate_date
@@ -75,7 +76,7 @@ def extract_for_date(date_str: str, base_dir: Path = BASE_DIR):
         logging.warning(f"No .tar files found in {download_dir}")
         return
 
-    for group in groups:
+    for group in tqdm(groups, desc=f"Extracting {date_str}", unit="group"):
         try:
             extract_tar_group(group, extract_dir)
         except Exception as e:

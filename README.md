@@ -33,6 +33,8 @@ cat v2025.05.18-planes-readsb-prod-0.tar.aa v2025.05.18-planes-readsb-prod-0.tar
 
 Adjust the filenames and folder names according to the date and files you've downloaded.
 
+OR run `python scripts/get_traces.py YYYY.MM.DD`
+
 ---
 
 ## 📂 Understanding the Extracted Files
