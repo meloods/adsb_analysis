@@ -1,25 +1,44 @@
+#!/usr/bin/env python3
+"""
+Download aircraft data files from GitHub releases by date.
+"""
+
 import argparse
-import re
 import logging
-import requests
+import re
 from pathlib import Path
-from tqdm import tqdm
 from typing import List
+
+import requests
+from tqdm import tqdm
 
 from utils import setup_logging, validate_date, load_config, get_data_dir
 
+# --- Setup ---
 setup_logging()
 config = load_config()
-DATA_DIR = get_data_dir(config)
-VALID_SUFFIXES = [".tar"] + [
+DATA_DIR: Path = get_data_dir(config)
+
+# --- Constants ---
+VALID_SUFFIXES: list[str] = [".tar"] + [
     f".tar.{chr1}{chr2}"
     for chr1 in "abcdefghijklmnopqrstuvwxyz"
     for chr2 in "abcdefghijklmnopqrstuvwxyz"
 ]
-IGNORED_SUFFIXES = [".tar.gz", ".zip"]
+IGNORED_SUFFIXES: list[str] = [".tar.gz", ".zip"]
 
 
 def get_asset_urls(release_url: str, tag: str) -> List[str]:
+    """
+    Extract downloadable asset URLs from the GitHub expanded_assets page for a given tag.
+
+    Args:
+        release_url: Full URL to the GitHub expanded_assets HTML page.
+        tag: The release tag used to identify relevant assets.
+
+    Returns:
+        List of full GitHub URLs pointing to downloadable asset files.
+    """
     logging.info(f"Fetching asset list from: {release_url}")
     response = requests.get(release_url)
     if response.status_code != 200:
@@ -27,24 +46,33 @@ def get_asset_urls(release_url: str, tag: str) -> List[str]:
         return []
 
     matches = re.findall(
-        rf'href=["\'](/.*?{re.escape(tag)}.*?)["\']', response.text, re.IGNORECASE
+        rf'href=["\'](/.*?{re.escape(tag)}.*?)["\']',
+        response.text,
+        re.IGNORECASE,
     )
-    asset_paths = list(set(matches))
+    asset_paths = list(set(matches))  # Deduplicate
 
-    asset_urls = []
+    asset_urls: list[str] = []
     for path in asset_paths:
-        if any(path.endswith(ignored) for ignored in IGNORED_SUFFIXES):
+        if any(path.endswith(suffix) for suffix in IGNORED_SUFFIXES):
             continue
-        if any(path.endswith(valid) for valid in VALID_SUFFIXES):
+        if any(path.endswith(suffix) for suffix in VALID_SUFFIXES):
             asset_urls.append(f"https://github.com{path}")
 
     return asset_urls
 
 
-def download_file(url: str, dest_dir: Path):
+def download_file(url: str, dest_dir: Path) -> None:
+    """
+    Download a single file from a URL to a target directory, with progress bar.
+
+    Args:
+        url: URL of the file to download.
+        dest_dir: Target directory where the file will be saved.
+    """
     dest_file = dest_dir / Path(url).name
 
-    logging.info(f"Downloading: {url.split('/')[-1]}")
+    logging.info(f"Downloading: {Path(url).name}")
     response = requests.get(url, stream=True)
     if response.status_code != 200:
         logging.error(f"Failed to download {url}: {response.status_code}")
@@ -68,7 +96,14 @@ def download_file(url: str, dest_dir: Path):
     logging.info(f"Saved to: {dest_file}")
 
 
-def download_for_date(date_str: str, base_download_dir: Path = DATA_DIR):
+def download_for_date(date_str: str, base_download_dir: Path = DATA_DIR) -> None:
+    """
+    Download all relevant GitHub release files for a given date.
+
+    Args:
+        date_str: Date in YYYY.MM.DD format (e.g., '2025.05.28').
+        base_download_dir: Base directory to store downloads.
+    """
     year = int(date_str.split(".")[0])
     if year not in (2024, 2025):
         logging.warning(f"Unsupported year: {year}")
@@ -94,23 +129,27 @@ def download_for_date(date_str: str, base_download_dir: Path = DATA_DIR):
         download_file(asset_url, dest_dir)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Command-line entry point."""
     parser = argparse.ArgumentParser(
-        description="Download aircraft data files from GitHub releases by date",
-        epilog="Example from root dir: PYTHONPATH=src python src/data_eng/download.py 2025.02.08",
+        description="Download aircraft data files from GitHub releases by date.",
+        epilog="Example: PYTHONPATH=src python src/data_eng/download.py 2024.12.21 2025.01.11",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "dates",
         nargs="+",
         type=validate_date,
-        help="One or more dates in YYYY.MM.DD format",
+        help="One or more dates in YYYY.MM.DD format.",
     )
-
     args = parser.parse_args()
 
     for date_str in args.dates:
         logging.info(f"\nDownloading data from {date_str}...")
         download_for_date(date_str)
 
-    logging.info("\nDownloading complete.")
+    logging.info("\nAll downloads complete.")
+
+
+if __name__ == "__main__":
+    main()

@@ -22,13 +22,34 @@ def setup_logging() -> None:
 
 
 def validate_date(date_str: str) -> str:
-    from datetime import datetime
+    """
+    Validate that the date string is in strict YYYY.MM.DD format
+    with zero-padded two-digit month and day (e.g., 2024.01.09).
+
+    Args:
+        date_str: Date string provided via CLI or script.
+
+    Returns:
+        The original date string if valid.
+
+    Raises:
+        argparse.ArgumentTypeError: If the format is incorrect.
+    """
     import argparse
+    from datetime import datetime
+    import re
+
+    pattern = r"^\d{4}\.\d{2}\.\d{2}$"
+    if not re.match(pattern, date_str):
+        raise argparse.ArgumentTypeError(
+            f"Invalid date format: '{date_str}'. Use YYYY.MM.DD with zero-padded month and day."
+        )
 
     try:
         datetime.strptime(date_str, "%Y.%m.%d")
-        return date_str
     except ValueError:
         raise argparse.ArgumentTypeError(
-            f"Invalid date format: {date_str}. Use YYYY.MM.DD."
+            f"Invalid date: '{date_str}'. Ensure it represents a real calendar date in YYYY.MM.DD format."
         )
+
+    return date_str
