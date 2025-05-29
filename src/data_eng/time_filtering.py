@@ -155,6 +155,11 @@ def process_time_filtering(date_str: str, base_data_dir: Path = DATA_DIR) -> Non
             # Reorder columns
             filtered_df = reorder_columns(filtered_df)
 
+            # Sort by time
+            filtered_df = filtered_df.sort_values(by="datetime_utc").reset_index(
+                drop=True
+            )
+
             # Define output file path
             output_file = (
                 processed_dir / f"{formatted_date}_{window['suffix']}_nearSG.csv"
