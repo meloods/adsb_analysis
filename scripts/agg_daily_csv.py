@@ -6,8 +6,9 @@ import logging
 from pathlib import Path
 import pandas as pd
 from typing import Generator, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import BASE_DIR, BATCH_SIZE, CHUNK_SIZE
+from config import BASE_DIR, BATCH_SIZE, CHUNK_SIZE, MAX_WORKERS
 from utils import setup_logging, validate_date
 
 setup_logging()
@@ -187,7 +188,9 @@ def write_chunked_csv(
         logging.info(f"Written rows {start_idx + 1}-{end_idx} of {len(df)}")
 
 
-def aggregate_daily_csv(date_str: str, base_dir: Path = BASE_DIR) -> bool:
+def aggregate_daily_csv(
+    date_str: str, base_dir: Path = BASE_DIR, use_parallel: bool = True
+) -> bool:
     """Aggregate all aircraft CSV files for a given date into a single file."""
 
     # Setup paths
@@ -211,34 +214,61 @@ def aggregate_daily_csv(date_str: str, base_dir: Path = BASE_DIR) -> bool:
 
     logging.info(f"Found {len(csv_files)} CSV files to aggregate for {date_str}")
 
+    import time
+
+    start_time = time.time()
+
     try:
         # Process files in batches to manage memory
         sorted_batches = []
 
-        for batch_df in batch_csv_reader(csv_files, BATCH_SIZE):
+        # Choose processing method based on dataset size and user preference
+        if use_parallel and len(csv_files) > BATCH_SIZE:
+            logging.info(f"Using parallel processing with {MAX_WORKERS} workers")
+            batch_reader = parallel_batch_csv_reader(csv_files, BATCH_SIZE)
+        else:
+            logging.info("Using sequential processing")
+            batch_reader = batch_csv_reader(csv_files, BATCH_SIZE)
+
+        for batch_df in batch_reader:
             if not batch_df.empty:
                 sorted_batches.append(batch_df)
+
+        processing_time = time.time() - start_time
 
         if not sorted_batches:
             logging.error("No valid data found in any CSV files")
             return False
 
+        logging.info(f"Batch processing completed in {processing_time:.2f} seconds")
+
         # Merge all sorted batches
+        merge_start = time.time()
         final_df = merge_sorted_dataframes(sorted_batches)
+        merge_time = time.time() - merge_start
 
         if final_df.empty:
             logging.error("Final DataFrame is empty after merging")
             return False
 
+        logging.info(f"Batch merging completed in {merge_time:.2f} seconds")
+
         # Verify final sort order
         if not final_df["abs_timestamp"].is_monotonic_increasing:
             logging.warning("Final DataFrame not properly sorted, re-sorting...")
+            sort_start = time.time()
             final_df = final_df.sort_values("abs_timestamp", ascending=True)
+            sort_time = time.time() - sort_start
+            logging.info(f"Final sorting completed in {sort_time:.2f} seconds")
 
         # Process final DataFrame: add datetime column and reorder columns
+        process_start = time.time()
         final_df = process_final_dataframe(final_df)
+        process_time = time.time() - process_start
+        logging.info(f"DataFrame processing completed in {process_time:.2f} seconds")
 
         # Write output
+        write_start = time.time()
         logging.info(f"Writing {len(final_df)} rows to {output_path}")
 
         if len(final_df) > CHUNK_SIZE:
@@ -247,13 +277,41 @@ def aggregate_daily_csv(date_str: str, base_dir: Path = BASE_DIR) -> bool:
             processed_dir.mkdir(parents=True, exist_ok=True)
             final_df.to_csv(output_path, index=False)
 
-        # Summary statistics
+        write_time = time.time() - write_start
+        total_time = time.time() - start_time
+
+        # Performance summary
+        logging.info(f"Writing completed in {write_time:.2f} seconds")
+        logging.info(f"\n{'=' * 50}")
+        logging.info(f"AGGREGATION PERFORMANCE SUMMARY for {date_str}")
+        logging.info(f"{'=' * 50}")
+        logging.info(f"Files processed: {len(csv_files)}")
         logging.info(
-            f"Successfully aggregated {len(csv_files)} files into {output_path}"
+            f"Processing method: {'Parallel' if use_parallel and len(csv_files) > BATCH_SIZE else 'Sequential'}"
         )
-        logging.info(f"Total rows: {len(final_df)}, Columns: {len(final_df.columns)}")
+        if use_parallel and len(csv_files) > BATCH_SIZE:
+            logging.info(f"Workers used: {MAX_WORKERS}")
+        logging.info(f"Batch processing time: {processing_time:.2f}s")
+        logging.info(f"Merging time: {merge_time:.2f}s")
+        logging.info(f"Final processing time: {process_time:.2f}s")
+        logging.info(f"Writing time: {write_time:.2f}s")
+        logging.info(f"Total time: {total_time:.2f}s")
+        logging.info(f"Rows: {len(final_df):,}, Columns: {len(final_df.columns)}")
+        logging.info(f"Processing rate: {len(csv_files) / total_time:.1f} files/second")
+        logging.info(f"Data rate: {len(final_df) / total_time:,.0f} rows/second")
+
+        # Memory efficiency info
+        if use_parallel and len(csv_files) > BATCH_SIZE:
+            theoretical_sequential_time = processing_time * MAX_WORKERS
+            speedup = (
+                theoretical_sequential_time / processing_time
+                if processing_time > 0
+                else 1
+            )
+            logging.info(f"Estimated speedup: {speedup:.1f}x")
+
         logging.info(
-            f"Timestamp range: {final_df['datetime'].min()} to {final_df['datetime'].max()}"
+            f"Timestamp range: {final_df['abs_timestamp'].min():.0f} to {final_df['abs_timestamp'].max():.0f}"
         )
 
         return True
@@ -269,14 +327,24 @@ def main():
         epilog="Example: python aggregate_daily_csv.py 2025.05.27",
     )
     parser.add_argument("date", type=validate_date, help="Date in YYYY.MM.DD format")
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Force sequential processing (disable parallel processing)",
+    )
 
     args = parser.parse_args()
 
-    logging.info(
-        f"Starting aggregation for {args.date} (batch_size={BATCH_SIZE}, chunk_size={CHUNK_SIZE})"
-    )
+    use_parallel = not args.sequential
 
-    success = aggregate_daily_csv(args.date)
+    if args.sequential:
+        logging.info("Sequential processing mode forced")
+    else:
+        logging.info(f"Parallel processing enabled (max_workers={MAX_WORKERS})")
+
+    logging.info(f"Starting aggregation for {args.date}")
+
+    success = aggregate_daily_csv(args.date, use_parallel=use_parallel)
     return 0 if success else 1
 
 
