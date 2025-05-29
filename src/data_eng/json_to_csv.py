@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """
 Convert JSON trace files to a single CSV file per date.
+Memory-efficient version with streaming processing.
 """
 
 import argparse
 import csv
 import json
 import logging
-import multiprocessing as mp
+import threading
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Iterator, Tuple
+from queue import Queue, Empty
+from typing import List, Dict, Any, Optional, Set
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc
+import time
 
 from tqdm import tqdm
 
@@ -28,11 +33,15 @@ DATA_DIR: Path = get_data_dir(config)
 PROCESSED_DIR: Path = get_processed_dir(config)
 
 # --- Constants ---
-BATCH_SIZE = 2000
-MAX_WORKERS = 12
+MAX_WORKERS = 4
+QUEUE_SIZE = 1000  # Limit queue size to control memory
+BATCH_WRITE_SIZE = 500  # Write every 500 rows instead of accumulating
 
-# Core trace fields (indices 0-13 in trace array)
-TRACE_FIELDS = [
+# Top-level metadata fields
+TOP_LEVEL_FIELDS = ["icao", "base_timestamp", "r", "t", "desc", "dbFlags"]
+
+# Core trace fields
+CORE_TRACE_FIELDS = [
     "seconds_offset",
     "latitude",
     "longitude",
@@ -41,7 +50,6 @@ TRACE_FIELDS = [
     "track_deg",
     "flags_bitfield",
     "vertical_rate_fpm",
-    "aircraft_metadata",
     "source_type",
     "geometric_altitude_ft",
     "geometric_vertical_rate_fpm",
@@ -49,8 +57,34 @@ TRACE_FIELDS = [
     "roll_angle_deg",
 ]
 
-# Top-level metadata fields
-TOP_LEVEL_FIELDS = ["icao", "base_timestamp", "r", "t", "desc", "dbFlags"]
+
+class ThreadSafeCSVWriter:
+    """Thread-safe CSV writer that handles concurrent writes."""
+
+    def __init__(self, csv_file: Path, fieldnames: List[str]):
+        self.csv_file = csv_file
+        self.fieldnames = fieldnames
+        self.lock = threading.Lock()
+        self.row_count = 0
+
+        # Write header
+        with csv_file.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+
+    def write_rows(self, rows: List[Dict[str, Any]]) -> None:
+        """Write multiple rows to CSV in a thread-safe manner."""
+        if not rows:
+            return
+
+        with self.lock:
+            with self.csv_file.open("a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=self.fieldnames)
+                for row in rows:
+                    # Ensure all fields are present
+                    clean_row = {field: row.get(field, "") for field in self.fieldnames}
+                    writer.writerow(clean_row)
+                self.row_count += len(rows)
 
 
 def flatten_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -77,9 +111,12 @@ def flatten_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return flattened
 
 
-def process_json_file(file_path: Path, include_metadata: bool) -> List[Dict[str, Any]]:
+def process_single_file(
+    file_path: Path, include_metadata: bool
+) -> List[Dict[str, Any]]:
     """
     Process a single JSON file and extract all trace entries.
+    Optimized for memory efficiency.
 
     Args:
         file_path: Path to the JSON file.
@@ -92,11 +129,9 @@ def process_json_file(file_path: Path, include_metadata: bool) -> List[Dict[str,
         with file_path.open("r") as f:
             data = json.load(f)
 
-        rows = []
+        # Extract top-level metadata once
         icao = data.get("icao", "")
         base_timestamp = data.get("timestamp", 0.0)
-
-        # Optional top-level fields
         registration = data.get("r", "")
         aircraft_type = data.get("t", "")
         description = data.get("desc", "")
@@ -104,10 +139,11 @@ def process_json_file(file_path: Path, include_metadata: bool) -> List[Dict[str,
 
         trace_data = data.get("trace", [])
 
+        # Process trace entries
+        rows = []
         for trace_entry in trace_data:
             if len(trace_entry) < 14:
-                # Skip malformed trace entries
-                continue
+                continue  # Skip malformed entries
 
             row = {
                 "icao": icao,
@@ -131,13 +167,17 @@ def process_json_file(file_path: Path, include_metadata: bool) -> List[Dict[str,
                 "roll_angle_deg": trace_entry[13],
             }
 
-            # Handle aircraft_metadata (index 8)
+            # Handle metadata if requested
             if include_metadata:
                 metadata = trace_entry[8] if len(trace_entry) > 8 else None
                 flattened_meta = flatten_metadata(metadata)
                 row.update(flattened_meta)
 
             rows.append(row)
+
+        # Clear data from memory immediately
+        del data
+        gc.collect()
 
         return rows
 
@@ -146,172 +186,90 @@ def process_json_file(file_path: Path, include_metadata: bool) -> List[Dict[str,
         return []
 
 
-def process_batch(args: Tuple[List[Path], bool]) -> List[Dict[str, Any]]:
+def file_worker(
+    file_queue: Queue,
+    result_queue: Queue,
+    include_metadata: bool,
+    progress_queue: Queue,
+) -> None:
     """
-    Process a batch of JSON files.
+    Worker function that processes files from queue.
 
     Args:
-        args: Tuple of (file_paths, include_metadata).
-
-    Returns:
-        Combined list of all rows from the batch.
+        file_queue: Queue containing file paths to process.
+        result_queue: Queue to put processed results.
+        include_metadata: Whether to include metadata.
+        progress_queue: Queue for progress updates.
     """
-    file_paths, include_metadata = args
-    all_rows = []
+    processed_count = 0
 
-    for file_path in file_paths:
-        rows = process_json_file(file_path, include_metadata)
-        all_rows.extend(rows)
+    while True:
+        try:
+            file_path = file_queue.get(timeout=1)
+            if file_path is None:  # Sentinel value to stop worker
+                break
 
-    return all_rows
+            rows = process_single_file(file_path, include_metadata)
+
+            if rows:
+                result_queue.put(rows)
+
+            processed_count += 1
+            progress_queue.put(1)  # Signal progress
+            file_queue.task_done()
+
+            # Periodic garbage collection
+            if processed_count % 50 == 0:
+                gc.collect()
+
+        except Empty:
+            continue  # Timeout, check for more work
+        except Exception as e:
+            logging.error(f"Worker error: {e}")
+            file_queue.task_done()
 
 
-def discover_files(json_dir: Path) -> List[Path]:
+def discover_metadata_fields(
+    sample_files: List[Path], max_samples: int = 50
+) -> Set[str]:
     """
-    Discover all JSON files in the directory.
+    Discover metadata fields from a sample of files.
+    Reduced sample size for memory efficiency.
 
     Args:
-        json_dir: Directory containing JSON files.
+        sample_files: List of files to sample.
+        max_samples: Maximum files to sample.
 
     Returns:
-        List of JSON file paths.
-    """
-    return list(json_dir.glob("*.json"))
-
-
-def get_all_metadata_fields(
-    sample_files: List[Path], max_samples: int = 100
-) -> List[str]:
-    """
-    Discover all possible metadata fields by sampling files.
-
-    Args:
-        sample_files: List of JSON file paths to sample.
-        max_samples: Maximum number of files to sample.
-
-    Returns:
-        Sorted list of unique metadata field names with 'meta_' prefix.
+        Set of unique metadata field names with 'meta_' prefix.
     """
     metadata_fields = set()
     sample_count = min(len(sample_files), max_samples)
+
+    logging.info(f"Sampling {sample_count} files to discover metadata fields...")
 
     for file_path in sample_files[:sample_count]:
         try:
             with file_path.open("r") as f:
                 data = json.load(f)
 
-            trace_data = data.get("trace", [])
+            # Check first few trace entries only
+            trace_data = data.get("trace", [])[:10]  # Limit to first 10 entries
+
             for trace_entry in trace_data:
                 if len(trace_entry) > 8 and trace_entry[8]:
                     metadata = trace_entry[8]
                     if isinstance(metadata, dict):
                         for key in metadata.keys():
                             metadata_fields.add(f"meta_{key}")
-        except Exception:
+
+            del data  # Free memory immediately
+
+        except Exception as e:
+            logging.warning(f"Error sampling {file_path.name}: {e}")
             continue
 
-    return sorted(metadata_fields)
-
-
-def write_csv_header(
-    csv_file: Path, include_metadata: bool, metadata_fields: List[str]
-) -> None:
-    """
-    Write CSV header to file.
-
-    Args:
-        csv_file: Path to the CSV file.
-        include_metadata: Whether metadata fields should be included.
-        metadata_fields: List of metadata field names.
-    """
-    base_fields = TOP_LEVEL_FIELDS + [
-        "seconds_offset",
-        "latitude",
-        "longitude",
-        "altitude_ft",
-        "ground_speed_kts",
-        "track_deg",
-        "flags_bitfield",
-        "vertical_rate_fpm",
-        "source_type",
-        "geometric_altitude_ft",
-        "geometric_vertical_rate_fpm",
-        "indicated_airspeed_kts",
-        "roll_angle_deg",
-    ]
-
-    if include_metadata:
-        all_fields = base_fields + metadata_fields
-    else:
-        all_fields = base_fields
-
-    with csv_file.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(all_fields)
-
-
-def write_csv_batch(
-    csv_file: Path,
-    rows: List[Dict[str, Any]],
-    include_metadata: bool,
-    metadata_fields: List[str],
-) -> None:
-    """
-    Append a batch of rows to the CSV file.
-
-    Args:
-        csv_file: Path to the CSV file.
-        rows: List of row dictionaries to write.
-        include_metadata: Whether metadata fields should be included.
-        metadata_fields: List of metadata field names.
-    """
-    if not rows:
-        return
-
-    base_fields = TOP_LEVEL_FIELDS + [
-        "seconds_offset",
-        "latitude",
-        "longitude",
-        "altitude_ft",
-        "ground_speed_kts",
-        "track_deg",
-        "flags_bitfield",
-        "vertical_rate_fpm",
-        "source_type",
-        "geometric_altitude_ft",
-        "geometric_vertical_rate_fpm",
-        "indicated_airspeed_kts",
-        "roll_angle_deg",
-    ]
-
-    if include_metadata:
-        all_fields = base_fields + metadata_fields
-    else:
-        all_fields = base_fields
-
-    with csv_file.open("a", newline="") as f:
-        writer = csv.writer(f)
-        for row in rows:
-            # Ensure all fields are present with default values
-            csv_row = []
-            for field in all_fields:
-                csv_row.append(row.get(field, ""))
-            writer.writerow(csv_row)
-
-
-def create_batches(files: List[Path], batch_size: int) -> Iterator[List[Path]]:
-    """
-    Create batches of files for processing.
-
-    Args:
-        files: List of file paths.
-        batch_size: Size of each batch.
-
-    Yields:
-        Batches of file paths.
-    """
-    for i in range(0, len(files), batch_size):
-        yield files[i : i + batch_size]
+    return metadata_fields
 
 
 def convert_date_to_csv(
@@ -322,6 +280,7 @@ def convert_date_to_csv(
 ) -> None:
     """
     Convert all JSON files for a given date to a single CSV file.
+    Memory-efficient version with streaming processing.
 
     Args:
         date_str: Date in YYYY.MM.DD format.
@@ -337,7 +296,7 @@ def convert_date_to_csv(
         return
 
     # Discover files
-    json_files = discover_files(json_dir)
+    json_files = list(json_dir.glob("*.json"))
     if not json_files:
         logging.warning(f"No JSON files found for {date_str}")
         return
@@ -347,41 +306,104 @@ def convert_date_to_csv(
     # Create output directory
     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate output filename (YYYY.MM.DD -> yyyy_mm_dd.csv)
+    # Generate output filename
     output_filename = date_str.replace(".", "_") + ".csv"
     csv_file = processed_dir / output_filename
 
     # Discover metadata fields if needed
-    metadata_fields = []
+    metadata_fields = set()
     if include_metadata:
-        logging.info("Discovering metadata fields...")
-        metadata_fields = get_all_metadata_fields(json_files)
+        metadata_fields = discover_metadata_fields(json_files)
         logging.info(f"Found {len(metadata_fields)} unique metadata fields")
 
-    # Write CSV header
-    write_csv_header(csv_file, include_metadata, metadata_fields)
+    # Prepare CSV fieldnames
+    all_fieldnames = TOP_LEVEL_FIELDS + CORE_TRACE_FIELDS + sorted(metadata_fields)
 
-    # Process files in batches using multiprocessing
-    batches = list(create_batches(json_files, BATCH_SIZE))
-    logging.info(f"Processing {len(batches)} batches with {MAX_WORKERS} workers")
+    # Initialize CSV writer
+    csv_writer = ThreadSafeCSVWriter(csv_file, all_fieldnames)
 
-    with mp.Pool(processes=MAX_WORKERS) as pool:
-        batch_args = [(batch, include_metadata) for batch in batches]
+    # Set up queues
+    file_queue = Queue(maxsize=QUEUE_SIZE)
+    result_queue = Queue(maxsize=QUEUE_SIZE)
+    progress_queue = Queue()
 
-        with tqdm(
-            total=len(batches), desc=f"Processing {date_str}", unit="batch"
-        ) as pbar:
-            for batch_rows in pool.imap(process_batch, batch_args):
-                write_csv_batch(csv_file, batch_rows, include_metadata, metadata_fields)
-                pbar.update(1)
+    # Fill file queue
+    for file_path in json_files:
+        file_queue.put(file_path)
+
+    # Add sentinel values to stop workers
+    for _ in range(MAX_WORKERS):
+        file_queue.put(None)
+
+    # Start worker threads
+    worker_threads = []
+    for i in range(MAX_WORKERS):
+        thread = threading.Thread(
+            target=file_worker,
+            args=(file_queue, result_queue, include_metadata, progress_queue),
+            name=f"Worker-{i + 1}",
+        )
+        thread.start()
+        worker_threads.append(thread)
+
+    # Process results and write to CSV
+    logging.info(f"Processing with {MAX_WORKERS} workers...")
+
+    processed_files = 0
+    pending_rows = []
+
+    with tqdm(
+        total=len(json_files), desc=f"Processing {date_str}", unit="file"
+    ) as pbar:
+        # Result collection loop
+        while processed_files < len(json_files):
+            try:
+                # Check for progress updates
+                while True:
+                    try:
+                        progress_queue.get_nowait()
+                        processed_files += 1
+                        pbar.update(1)
+                    except Empty:
+                        break
+
+                # Get results and batch write
+                try:
+                    rows = result_queue.get(timeout=0.1)
+                    pending_rows.extend(rows)
+
+                    # Write batch when it gets large enough
+                    if len(pending_rows) >= BATCH_WRITE_SIZE:
+                        csv_writer.write_rows(pending_rows)
+                        pending_rows = []
+                        gc.collect()  # Clean up memory
+
+                except Empty:
+                    pass  # No results ready yet
+
+                # Small sleep to prevent busy waiting
+                time.sleep(0.01)
+
+            except KeyboardInterrupt:
+                logging.info("Interrupted by user")
+                break
+
+    # Write any remaining rows
+    if pending_rows:
+        csv_writer.write_rows(pending_rows)
+
+    # Wait for all workers to complete
+    for thread in worker_threads:
+        thread.join()
 
     logging.info(f"CSV file saved to: {csv_file}")
+    logging.info(f"Total rows written: {csv_writer.row_count:,}")
 
 
 def main() -> None:
     """Command-line entry point."""
     parser = argparse.ArgumentParser(
-        description="Convert JSON trace files to CSV format.",
+        description="Convert JSON trace files to CSV format (memory-efficient version).",
         epilog=(
             "Example: PYTHONPATH=src python src/data_eng/json_to_csv.py 2025.02.08 --metadata true\n"
             "Output: data/processed/2025_02_08.csv"
@@ -407,7 +429,7 @@ def main() -> None:
 
     if include_metadata:
         logging.info(
-            "Metadata inclusion enabled - this may significantly increase file size and processing time"
+            "Metadata inclusion enabled - processing with reduced sample size for efficiency"
         )
 
     for date_str in args.dates:
