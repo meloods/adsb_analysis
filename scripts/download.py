@@ -2,17 +2,14 @@ import argparse
 import re
 import logging
 import requests
-from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
 from typing import List
 
-BASE_DIR = Path("data")
+from config import BASE_DIR
+from utils import setup_logging, validate_date
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+setup_logging()
 
 
 def get_asset_urls(release_url: str, tag: str) -> List[str]:
@@ -101,17 +98,6 @@ def download_for_date(date_str: str, base_download_dir: Path = BASE_DIR):
 
     for asset_url in asset_urls:
         download_file(asset_url, dest_dir)
-
-
-def validate_date(date_str: str) -> str:
-    """Validate date format (YYYY.MM.DD)."""
-    try:
-        datetime.strptime(date_str, "%Y.%m.%d")
-        return date_str
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"Invalid date format: {date_str}. Use YYYY.MM.DD."
-        )
 
 
 if __name__ == "__main__":

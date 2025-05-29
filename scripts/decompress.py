@@ -4,27 +4,13 @@
 import argparse
 import gzip
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Generator
 
-BASE_DIR = Path("data")
+from config import BASE_DIR
+from utils import setup_logging, validate_date
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
-
-
-def validate_date(date_str: str) -> str:
-    """Validate date format (YYYY.MM.DD)."""
-    try:
-        datetime.strptime(date_str, "%Y.%m.%d")
-        return date_str
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"Invalid date format: {date_str}. Use YYYY.MM.DD."
-        )
+setup_logging()
 
 
 def iter_gz_json_files(traces_root: Path) -> Generator[Path, None, None]:
