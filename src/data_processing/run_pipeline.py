@@ -41,7 +41,7 @@ def main():
     logging.info(f"📦 Include metadata: {include_metadata}")
 
     input_dir = DATA_DIR / date_str / "json"
-    output_csv = DATA_DIR / "processed " / f"{date_str.replace('.', '_')}.csv"
+    output_csv = DATA_DIR / "processed" / f"{date_str.replace('.', '_')}.csv"
 
     if not input_dir.exists():
         logging.error(f"Input directory not found: {input_dir}")

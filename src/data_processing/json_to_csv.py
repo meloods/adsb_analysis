@@ -20,7 +20,7 @@ def flatten_all_json_to_csv(
     for file_path in input_dir.glob("trace_full_*.json"):
         num_files += 1
         try:
-            with gzip.open(file_path, "rt", encoding="utf-8") as f:
+            with file_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
 
             icao = data.get("icao")
@@ -34,6 +34,8 @@ def flatten_all_json_to_csv(
                 "t": data.get("t"),
                 "desc": data.get("desc"),
                 "dbFlags": data.get("dbFlags"),
+                "ownOp": data.get("ownOp"),
+                "year": data.get("year"),
             }
 
             for entry in trace:
