@@ -66,6 +66,79 @@ def read_csv_safely(csv_path: Path) -> Optional[pd.DataFrame]:
         return None
 
 
+def process_single_batch(batch_files: List[Path]) -> pd.DataFrame:
+    """Process a single batch of CSV files."""
+    batch_dataframes = []
+
+    for csv_path in batch_files:
+        df = read_csv_safely(csv_path)
+        if df is not None:
+            batch_dataframes.append(df)
+
+    if batch_dataframes:
+        try:
+            batch_df = pd.concat(batch_dataframes, ignore_index=True, sort=False)
+            batch_df = batch_df.sort_values("abs_timestamp", ascending=True)
+            return batch_df
+        except Exception as e:
+            logging.error(f"Failed to concatenate batch: {e}")
+            return pd.DataFrame()
+
+    return pd.DataFrame()
+
+
+def parallel_batch_csv_reader(
+    csv_files: List[Path], batch_size: int = BATCH_SIZE
+) -> Generator[pd.DataFrame, None, None]:
+    """Generator that yields concatenated DataFrames from batches of CSV files using parallel processing."""
+
+    # Split files into batches
+    file_batches = [
+        csv_files[i : i + batch_size] for i in range(0, len(csv_files), batch_size)
+    ]
+
+    if len(file_batches) == 1:
+        # For single batch, process sequentially to avoid overhead
+        logging.info("Single batch detected, processing sequentially")
+        batch_df = process_single_batch(file_batches[0])
+        if not batch_df.empty:
+            yield batch_df
+        return
+
+    logging.info(
+        f"Processing {len(file_batches)} batches in parallel with {MAX_WORKERS} workers"
+    )
+
+    # Process batches in parallel
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Submit all batch processing tasks
+        future_to_batch = {
+            executor.submit(process_single_batch, batch_files): i
+            for i, batch_files in enumerate(file_batches)
+        }
+
+        completed_batches = 0
+
+        # Collect results as they complete
+        for future in as_completed(future_to_batch):
+            batch_index = future_to_batch[future]
+
+            try:
+                batch_df = future.result()
+                completed_batches += 1
+
+                if not batch_df.empty:
+                    logging.info(
+                        f"Completed batch {completed_batches}/{len(file_batches)} (batch {batch_index + 1}): {len(batch_df)} rows"
+                    )
+                    yield batch_df
+                else:
+                    logging.warning(f"Batch {batch_index + 1} produced no valid data")
+
+            except Exception as e:
+                logging.error(f"Failed to process batch {batch_index + 1}: {e}")
+
+
 def batch_csv_reader(
     csv_files: List[Path], batch_size: int = BATCH_SIZE
 ) -> Generator[pd.DataFrame, None, None]:
@@ -311,7 +384,7 @@ def aggregate_daily_csv(
             logging.info(f"Estimated speedup: {speedup:.1f}x")
 
         logging.info(
-            f"Timestamp range: {final_df['datetime'].min()} to {final_df['datetime'].max()}"
+            f"Timestamp range: {final_df['abs_timestamp'].min():.0f} to {final_df['abs_timestamp'].max():.0f}"
         )
 
         return True
@@ -327,14 +400,24 @@ def main():
         epilog="Example: python aggregate_daily_csv.py 2025.05.27",
     )
     parser.add_argument("date", type=validate_date, help="Date in YYYY.MM.DD format")
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Force sequential processing (disable parallel processing)",
+    )
 
     args = parser.parse_args()
 
-    logging.info(
-        f"Starting aggregation for {args.date} (batch_size={BATCH_SIZE}, chunk_size={CHUNK_SIZE})"
-    )
+    use_parallel = not args.sequential
 
-    success = aggregate_daily_csv(args.date)
+    if args.sequential:
+        logging.info("Sequential processing mode forced")
+    else:
+        logging.info(f"Parallel processing enabled (max_workers={MAX_WORKERS})")
+
+    logging.info(f"Starting aggregation for {args.date}")
+
+    success = aggregate_daily_csv(args.date, use_parallel=use_parallel)
     return 0 if success else 1
 
 

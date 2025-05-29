@@ -46,7 +46,7 @@ def flatten_aircraft_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, A
     return flattened
 
 
-def convert_json_to_csv(json_path: Path) -> bool:
+def convert_json_to_csv(json_path: Path, include_metadata: bool = False) -> bool:
     """Convert a single JSON trace file to CSV format."""
     try:
         # Read JSON file
@@ -78,9 +78,11 @@ def convert_json_to_csv(json_path: Path) -> bool:
             for i, field_name in enumerate(TRACE_FIELD_NAMES):
                 if i < len(trace_entry):
                     if field_name == "aircraft_metadata":
-                        # Handle metadata separately - flatten it
-                        flattened_meta = flatten_aircraft_metadata(trace_entry[i])
-                        row.update(flattened_meta)
+                        # Handle metadata based on include_metadata flag
+                        if include_metadata:
+                            flattened_meta = flatten_aircraft_metadata(trace_entry[i])
+                            row.update(flattened_meta)
+                        # If include_metadata is False, skip this field entirely
                     else:
                         row[field_name] = trace_entry[i]
                 else:
@@ -151,10 +153,17 @@ def convert_json_to_csv(json_path: Path) -> bool:
 def main():
     parser = argparse.ArgumentParser(
         description="Convert a single trace JSON file to CSV format",
-        epilog="Example: python scripts/json_to_csv.py data/2024.12.02/traces/trace_full_e49649.json",
+        epilog="Example: python json_to_csv.py data/2025.05.27/traces/trace_full_abc123.json --metadata true",
     )
     parser.add_argument(
         "json_file", type=Path, help="Path to the trace JSON file to convert"
+    )
+    parser.add_argument(
+        "--metadata",
+        type=str,
+        choices=["true", "false"],
+        default="false",
+        help="Include and flatten aircraft metadata (default: false)",
     )
 
     args = parser.parse_args()
@@ -168,7 +177,10 @@ def main():
             f"File doesn't match expected naming pattern: {args.json_file.name}"
         )
 
-    success = convert_json_to_csv(args.json_file)
+    # Convert string flag to boolean
+    include_metadata = args.metadata.lower() == "true"
+
+    success = convert_json_to_csv(args.json_file, include_metadata)
     return 0 if success else 1
 
 
