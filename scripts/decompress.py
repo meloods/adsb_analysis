@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Decompress all gzipped JSON files from subfolders in extracted/traces."""
+
+import argparse
+import gzip
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Generator
+
+BASE_DIR = Path("data")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+
+def validate_date(date_str: str) -> str:
+    """Validate date format (YYYY.MM.DD)."""
+    try:
+        datetime.strptime(date_str, "%Y.%m.%d")
+        return date_str
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid date format: {date_str}. Use YYYY.MM.DD."
+        )
+
+
+def iter_gz_json_files(traces_root: Path) -> Generator[Path, None, None]:
+    """Yield all .json files inside traces/** subfolders."""
+    for path in traces_root.rglob("*.json"):
+        if path.is_file():
+            yield path
+
+
+def decompress_file(gz_path: Path, out_dir: Path):
+    """Decompress gzipped .json file into flat output directory."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / gz_path.name
+
+    try:
+        with gzip.open(gz_path, "rb") as f_in, open(out_path, "wb") as f_out:
+            f_out.write(f_in.read())
+        # logging.info(f"Decompressed: {gz_path.name}")
+    except Exception as e:
+        logging.error(f"Failed to decompress {gz_path}: {e}")
+
+
+def decompress_for_date(date_str: str, base_dir: Path = BASE_DIR):
+    date_path = base_dir / date_str
+    in_dir = date_path / "extracted" / "traces"
+    out_dir = date_path / "traces"
+
+    if not in_dir.exists():
+        logging.warning(f"No input directory: {in_dir}")
+        return
+
+    count = 0
+    for gz_file in iter_gz_json_files(in_dir):
+        decompress_file(gz_file, out_dir)
+        count += 1
+
+    if count == 0:
+        logging.warning(f"No .json files found in {in_dir}")
+    else:
+        logging.info(f"Decompressed {count} files into {out_dir}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Decompress gunzipped JSON files into flat directory.",
+        epilog="Example: python decompress.py 2025.05.27 2025.05.18",
+    )
+    parser.add_argument(
+        "dates",
+        nargs="+",
+        type=validate_date,
+        help="One or more dates in YYYY.MM.DD format",
+    )
+
+    args = parser.parse_args()
+
+    for date_str in args.dates:
+        logging.info(f"\nDecompressing traces for {date_str}...")
+        decompress_for_date(date_str)
+
+    logging.info("\nDecompression complete.")
