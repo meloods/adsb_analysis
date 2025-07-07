@@ -121,7 +121,6 @@ def process_single_file(
 
 def flatten_all_json_to_csv(
     date_str: str,
-    base_download_dir: Path = DATA_DIR,
     include_metadata: bool = False,
 ) -> None:
     """
@@ -129,11 +128,10 @@ def flatten_all_json_to_csv(
 
     Args:
         date_str: Date in YYYY.MM.DD format (e.g., '2025.05.28').
-        base_download_dir: Base directory to store downloads.
         include_metadata: Whether to flatten aircraft_metadata fields.
     """
     input_dir = DATA_DIR / date_str / "json"
-    output_dir = DATA_DIR / date_str
+    output_dir = DATA_DIR / date_str / "csv"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_csv = output_dir / f"{date_str.replace('.', '-')}_nearSG.csv"
     file_paths = list(input_dir.glob("trace_full_*.json"))
@@ -187,11 +185,7 @@ def main() -> None:
 
     for date_str in args.dates:
         logging.info(f"\n🧩 Converting JSON to CSV for {date_str}...")
-        input_dir = DATA_DIR / str(date_str)
-        output_dir = DATA_DIR / str(date_str) / "csv"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_csv = output_dir / f"{str(date_str).replace('.', '_')}.csv"
-        flatten_all_json_to_csv(str(input_dir), output_csv, args.include_metadata)
+        flatten_all_json_to_csv(date_str, args.include_metadata)
 
     logging.info("\n🎉 JSON-to-CSV conversion complete.")
 
