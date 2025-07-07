@@ -5,7 +5,7 @@ Convert flattened trace JSON files into hourly CSV files using streaming archite
 
 import argparse
 import csv
-import json
+import orjson
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -150,7 +150,7 @@ def flatten_trace_entry(
             value = trace_entry[idx]
             # Convert aircraft_metadata dict to JSON string
             if column == "aircraft_metadata" and isinstance(value, dict):
-                row[column] = json.dumps(value, separators=(",", ":"))
+                row[column] = orjson.dumps(value).decode("utf-8")
             else:
                 row[column] = value
         else:
@@ -177,7 +177,8 @@ def process_file_streaming(
 
     try:
         with file_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+            content = f.read()
+            data = orjson.loads(content)
 
         # Update file metadata with actual values
         for key in TOP_LEVEL_KEYS:
