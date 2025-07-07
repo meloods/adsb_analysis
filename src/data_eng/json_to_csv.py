@@ -7,9 +7,8 @@ import argparse
 import csv
 import json
 import logging
-from math import radians, cos, sin, asin, sqrt
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO
+from typing import Any, Dict, List, Optional
 from tqdm import tqdm
 
 
@@ -47,8 +46,6 @@ TOP_LEVEL_KEYS: list[str] = [
     "year",
     "ownOp",
 ]
-SINGAPORE_COORDS = (1.3521, 103.8198)  # latitude, longitude
-RADIUS_KM = 300
 
 
 def flatten_trace_entry(
@@ -122,17 +119,6 @@ def process_single_file(
     return rows
 
 
-def haversine(lat1, lon1, lat2, lon2):
-    # Earth radius in kilometers
-    R = 6371.0
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    c = 2 * asin(sqrt(a))
-    return R * c
-
-
 def flatten_all_json_to_csv(
     date_str: str,
     base_download_dir: Path = DATA_DIR,
@@ -164,15 +150,8 @@ def flatten_all_json_to_csv(
     for file_path in tqdm(file_paths, desc="🔍 Filtering JSON files", unit="file"):
         rows = process_single_file(file_path, include_metadata)
         for row in rows:
-            lat = row.get("latitude")
-            lon = row.get("longitude")
-            if (
-                lat is not None
-                and lon is not None
-                and haversine(lat, lon, *SINGAPORE_COORDS) <= RADIUS_KM
-            ):
-                all_rows.append(row)
-                all_fieldnames.update(row.keys())
+            all_rows.append(row)
+            all_fieldnames.update(row.keys())
 
     if not all_rows:
         logging.warning(f"No rows produced from {input_dir}")
@@ -209,7 +188,7 @@ def main() -> None:
     for date_str in args.dates:
         logging.info(f"\n🧩 Converting JSON to CSV for {date_str}...")
         input_dir = DATA_DIR / date_str / "json"
-        output_dir = DATA_DIR / date_str / "near_sg"
+        output_dir = DATA_DIR / date_str / "csv"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_csv = output_dir / f"{date_str.replace('.', '_')}.csv"
         flatten_all_json_to_csv(input_dir, output_csv, args.include_metadata)
