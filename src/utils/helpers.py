@@ -16,10 +16,12 @@ def get_processed_dir(config: dict[str, Any]) -> Path:
     return Path(config["paths"]["processed_dir"]).resolve()
 
 
-def setup_logging() -> None:
+def setup_logging(log_filename: str = "log.txt") -> None:
     import logging
 
     logging.basicConfig(
+        filename=log_filename,  # Log file path
+        filemode="w",  # 'w' = overwrite; use 'a' to append
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )

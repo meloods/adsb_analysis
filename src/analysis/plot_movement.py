@@ -116,7 +116,7 @@ def main():
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("aircraft_tracks_map.html"),
+        default=None,
         help="Output HTML file",
     )
     parser.add_argument(
@@ -127,6 +127,12 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Determine output file name
+    if args.output is None:
+        csv_stem = args.csv_file.stem
+        args.output = Path(f"{csv_stem}_aircraft_tracks_map.html")
+
     plot_aircraft_movements_folium(args.csv_file, args.output, args.bbox)
 
 
