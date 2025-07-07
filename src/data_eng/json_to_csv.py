@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from tqdm import tqdm
 
 
-from utils import setup_logging, load_config, get_data_dir, validate_date
+from src.utils import setup_logging, load_config, get_data_dir, validate_date
 
 # --- Setup ---
 setup_logging()
@@ -187,11 +187,11 @@ def main() -> None:
 
     for date_str in args.dates:
         logging.info(f"\n🧩 Converting JSON to CSV for {date_str}...")
-        input_dir = DATA_DIR / date_str / "json"
-        output_dir = DATA_DIR / date_str / "csv"
+        input_dir = DATA_DIR / str(date_str)
+        output_dir = DATA_DIR / str(date_str) / "csv"
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_csv = output_dir / f"{date_str.replace('.', '_')}.csv"
-        flatten_all_json_to_csv(input_dir, output_csv, args.include_metadata)
+        output_csv = output_dir / f"{str(date_str).replace('.', '_')}.csv"
+        flatten_all_json_to_csv(str(input_dir), output_csv, args.include_metadata)
 
     logging.info("\n🎉 JSON-to-CSV conversion complete.")
 
