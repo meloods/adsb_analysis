@@ -21,7 +21,7 @@ config = load_config()
 DATA_DIR: Path = get_data_dir(config)
 
 # --- Constants ---
-BUFFER_SIZE = 5000  # Number of rows to buffer before writing
+BUFFER_SIZE = 12000  # Number of rows to buffer before writing
 
 # Predefined schema - includes datetime_utc for hour routing
 PREDEFINED_COLUMNS = [

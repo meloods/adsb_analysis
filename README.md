@@ -15,6 +15,9 @@ After activating your environment, run the following command to get the data:
 ```bash
 PYTHONPATH=src python src/data_eng/run_pipeline.py 2025.02.08 2025.02.04 2025.02.03 2024.12.07 2024.12.03 2024.12.02
 ```
+
+conda install conda-forge::qt6-wayland
+
 ---
 
 # 📄 JSON File Format: `trace_full_<ICAO-hex-id>.json`
